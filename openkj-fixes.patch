@@ -1,0 +1,352 @@
+diff -ru a/src/dlgcustompatterns.cpp b/src/dlgcustompatterns.cpp
+--- a/src/dlgcustompatterns.cpp	2025-08-12 16:19:06.000000000 +0000
++++ b/src/dlgcustompatterns.cpp	2026-11-09 22:16:41.251993682 +0000
+@@ -65,7 +65,9 @@
+                                          tr("New Pattern"), &ok);
+     if (ok && !name.isEmpty()) {
+         QSqlQuery query;
+-        query.exec("INSERT INTO custompatterns (name) VALUES(\"" + name + "\")");
++        query.prepare("INSERT INTO custompatterns (name) VALUES(:name)");
++        query.bindValue(":name", name);
++        query.exec();
+         m_patternsModel.loadFromDB();
+     }
+ }
+@@ -74,7 +76,9 @@
+     auto pattern = getSelectedPattern();
+     if (pattern) {
+         QSqlQuery query;
+-        query.exec("DELETE FROM custompatterns WHERE name == \"" + pattern->getName() + "\"");
++        query.prepare("DELETE FROM custompatterns WHERE name = :name");
++        query.bindValue(":name", pattern->getName());
++        query.exec();
+         m_patternsModel.loadFromDB();
+     }
+ }
+@@ -91,10 +95,17 @@
+         tcg = QString::number(ui->spinBoxTitleCaptureGrp->value());
+         dcg = QString::number(ui->spinBoxDiscIdCaptureGrp->value());
+         name = pattern->getName();
+-        query.exec("UPDATE custompatterns SET artistregex = \"" + arx + "\", titleregex = \"" + trx +
+-                   "\", discidregex = \"" + drx + \
+-                   "\", artistcapturegrp = " + acg + ", titlecapturegrp = " + tcg + ", discidcapturegrp = " + dcg +
+-                   " WHERE name = \"" + name + "\"");
++        query.prepare("UPDATE custompatterns SET artistregex = :arx, titleregex = :trx, discidregex = :drx, "
++                      "artistcapturegrp = :acg, titlecapturegrp = :tcg, discidcapturegrp = :dcg "
++                      "WHERE name = :name");
++        query.bindValue(":arx", arx);
++        query.bindValue(":trx", trx);
++        query.bindValue(":drx", drx);
++        query.bindValue(":acg", acg.toInt());
++        query.bindValue(":tcg", tcg.toInt());
++        query.bindValue(":dcg", dcg.toInt());
++        query.bindValue(":name", name);
++        query.exec();
+         m_patternsModel.loadFromDB();
+     }
+ }
+diff -ru a/src/dlgdatabase.cpp b/src/dlgdatabase.cpp
+--- a/src/dlgdatabase.cpp	2025-08-12 16:19:06.000000000 +0000
++++ b/src/dlgdatabase.cpp	2026-11-09 22:16:41.252090247 +0000
+@@ -114,7 +114,9 @@
+             {
+                 pattern = SourceDir::CUSTOM;
+                 QString name = selected.split(": ").at(1);
+-                query.exec("SELECT patternid FROM custompatterns WHERE name == \"" + name + "\"");
++                query.prepare("SELECT patternid FROM custompatterns WHERE name = :name");
++                query.bindValue(":name", name);
++                query.exec();
+                 if (query.first())
+                     customPattern = query.value(0).toInt();
+             }
+diff -ru a/src/dlgsongshoppurchase.cpp b/src/dlgsongshoppurchase.cpp
+--- a/src/dlgsongshoppurchase.cpp	2025-08-12 16:19:06.000000000 +0000
++++ b/src/dlgsongshoppurchase.cpp	2026-11-09 22:17:22.390208903 +0000
+@@ -20,7 +20,7 @@
+     ui->lineEditCCV->setValidator(new QRegExpValidator(QRegExp("[0-9]*"), this));
+     knLoginTest = false;
+     ui->cbxSaveAccount->setChecked(m_settings.saveKNAccount());
+-    ui->cbxSaveCard->setChecked(m_settings.saveCC());
++    m_settings.clearCC(); // purge any card saved by older versions
+     authenticated = false;
+     setupDone = true;
+     connect(shop.get(), &SongShop::paymentProcessingFailed, this, &DlgSongShopPurchase::paymentProcessingFailed);
+@@ -65,7 +65,7 @@
+     if (!setupDone)
+         return;
+     qInfo() << "running doAuth";
+-    if ((m_settings.saveCC() || m_settings.saveKNAccount()) && m_settings.passIsSet())
++    if (m_settings.saveKNAccount() && m_settings.passIsSet())
+     {
+         setupDone = false;
+         if (!authenticated)
+@@ -86,13 +86,6 @@
+             ui->lineEditKNUser->setText(m_settings.karoakeDotNetUser(password));
+             ui->lineEditKNPass->setText(m_settings.karoakeDotNetPass(password));
+         }
+-        if (m_settings.saveCC())
+-        {
+-            ui->lineEditCCN->setText(m_settings.getCCN(password));
+-            ui->lineEditCCM->setText(m_settings.getCCM(password));
+-            ui->lineEditCCY->setText(m_settings.getCCY(password));
+-            ui->lineEditCCV->setText(m_settings.getCCV(password));
+-        }
+         setupDone = true;
+     }
+ }
+@@ -229,60 +222,6 @@
+     }
+ }
+ 
+-void DlgSongShopPurchase::on_cbxSaveCard_stateChanged(int arg1)
+-{
+-    if (!setupDone)
+-        return;
+-    if ((arg1) && (!authenticated))
+-    {
+-        if (m_settings.passIsSet())
+-        {
+-            DlgPassword dlgPass;
+-            if (dlgPass.exec() == QDialog::Accepted)
+-            {
+-                password = dlgPass.getPassword();
+-                authenticated = true;
+-                m_settings.setCC(ui->lineEditCCN->text(), ui->lineEditCCM->text(),ui->lineEditCCY->text(), ui->lineEditCCV->text(), password);
+-                m_settings.setSaveCC(true);
+-            }
+-            else
+-            {
+-                password = "";
+-                authenticated = false;
+-                ui->cbxSaveCard->setChecked(false);
+-                m_settings.setSaveCC(false);
+-            }
+-        }
+-        else
+-        {
+-            DlgSetPassword dlgSetPw;
+-            if (dlgSetPw.exec() == QDialog::Accepted)
+-            {
+-                password = dlgSetPw.getPassword();
+-                authenticated = true;
+-                m_settings.setCC(ui->lineEditCCN->text(), ui->lineEditCCM->text(),ui->lineEditCCY->text(), ui->lineEditCCV->text(), password);
+-                m_settings.setSaveCC(true);
+-            }
+-            else
+-            {
+-                ui->cbxSaveCard->setChecked(false);
+-                m_settings.setSaveCC(false);
+-            }
+-        }
+-    }
+-    else if (arg1 && authenticated)
+-    {
+-        m_settings.setCC(ui->lineEditCCN->text(), ui->lineEditCCM->text(),ui->lineEditCCY->text(), ui->lineEditCCV->text(), password);
+-        m_settings.setSaveCC(true);
+-    }
+-    else
+-    {
+-        m_settings.clearCC();
+-        m_settings.setSaveCC(false);
+-    }
+-}
+-
+-
+ void DlgSongShopPurchase::showEvent(QShowEvent *event)
+ {
+     QDialog::showEvent(event);
+@@ -317,8 +256,6 @@
+         return;
+     ui->lineEditCCN->setEchoMode(QLineEdit::Normal);
+     setupDone = false;
+-    if (m_settings.saveCC() && authenticated)
+-        m_settings.setCC(ui->lineEditCCN->text(), ui->lineEditCCM->text(),ui->lineEditCCY->text(), ui->lineEditCCV->text(), password);
+     setupDone = true;
+ }
+ 
+@@ -328,8 +265,6 @@
+     if (!setupDone)
+         return;
+     setupDone = false;
+-    if (m_settings.saveCC() && authenticated)
+-        m_settings.setCC(ui->lineEditCCN->text(), ui->lineEditCCM->text(),ui->lineEditCCY->text(), ui->lineEditCCV->text(), password);
+     setupDone = true;
+ }
+ 
+@@ -339,8 +274,6 @@
+     if (!setupDone)
+         return;
+     setupDone = false;
+-    if (m_settings.saveCC() && authenticated)
+-        m_settings.setCC(ui->lineEditCCN->text(), ui->lineEditCCM->text(),ui->lineEditCCY->text(), ui->lineEditCCV->text(), password);
+     setupDone = true;
+ }
+ 
+@@ -350,8 +283,6 @@
+     if (!setupDone)
+         return;
+     setupDone = false;
+-    if (m_settings.saveCC() && authenticated)
+-        m_settings.setCC(ui->lineEditCCN->text(), ui->lineEditCCM->text(),ui->lineEditCCY->text(), ui->lineEditCCV->text(), password);
+     setupDone = true;
+ }
+ 
+diff -ru a/src/dlgsongshoppurchase.h b/src/dlgsongshoppurchase.h
+--- a/src/dlgsongshoppurchase.h	2025-08-12 16:19:06.000000000 +0000
++++ b/src/dlgsongshoppurchase.h	2026-11-09 22:17:22.390376640 +0000
+@@ -38,8 +38,6 @@
+ 
+     void on_cbxSaveAccount_stateChanged(int arg1);
+ 
+-    void on_cbxSaveCard_stateChanged(int arg1);
+-
+     void on_lineEditKNUser_textChanged(const QString &arg1);
+ 
+     void on_lineEditKNPass_textChanged(const QString &arg1);
+diff -ru a/src/dlgsongshoppurchase.ui b/src/dlgsongshoppurchase.ui
+--- a/src/dlgsongshoppurchase.ui	2025-08-12 16:19:06.000000000 +0000
++++ b/src/dlgsongshoppurchase.ui	2026-11-09 22:17:22.390518337 +0000
+@@ -326,13 +326,6 @@
+       <item>
+        <layout class="QHBoxLayout" name="horizontalLayout_3">
+         <item>
+-         <widget class="QCheckBox" name="cbxSaveCard">
+-          <property name="text">
+-           <string>Save card</string>
+-          </property>
+-         </widget>
+-        </item>
+-        <item>
+          <spacer name="horizontalSpacer">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+diff -ru a/src/settings.cpp b/src/settings.cpp
+--- a/src/settings.cpp	2025-08-12 16:19:06.000000000 +0000
++++ b/src/settings.cpp	2026-11-09 22:17:22.388900576 +0000
+@@ -218,26 +218,14 @@
+     return false;
+ }
+ 
+-void Settings::setCC(QString ccn, QString month, QString year, QString ccv, QString passwd)
+-{
+-    QString cc = ccn + "," + month + "," + year + "," + ccv;
+-    SimpleCrypt simpleCrypt(this->hash(passwd));
+-    settings->setValue("cc", simpleCrypt.encryptToString(cc));
+-}
+ 
+-void Settings::setSaveCC(bool save)
+-{
+-    settings->setValue("saveCC", save);
+-}
+ 
+-bool Settings::saveCC()
+-{
+-    return settings->value("saveCC", false).toBool();
+-}
+ 
+ void Settings::clearCC()
+ {
++    // Saved card details are no longer supported. This wipes anything stored by older versions.
+     settings->remove("cc");
++    settings->remove("saveCC");
+ }
+ 
+ void Settings::clearKNAccount()
+@@ -277,49 +265,9 @@
+     return settings->value("dbDoubleClickAddsSong", false).toBool();
+ }
+ 
+-QString Settings::getCCN(const QString &password)
+-{
+-    SimpleCrypt simpleCrypt(this->hash(password));
+-    QString encrypted = settings->value("cc", QString()).toString();
+-    if (encrypted == QString())
+-        return QString();
+-    QString cc = simpleCrypt.decryptToString(encrypted);
+-    QStringList parts = cc.split(",");
+-    return parts.at(0);
+-}
+-
+-QString Settings::getCCM(const QString &password)
+-{
+-    SimpleCrypt simpleCrypt(this->hash(password));
+-    QString encrypted = settings->value("cc", QString()).toString();
+-    if (encrypted == QString())
+-        return QString();
+-    QString cc = simpleCrypt.decryptToString(encrypted);
+-    QStringList parts = cc.split(",");
+-    return parts.at(1);
+-}
+-
+-QString Settings::getCCY(const QString &password)
+-{
+-    SimpleCrypt simpleCrypt(this->hash(password));
+-    QString encrypted = settings->value("cc", QString()).toString();
+-    if (encrypted == QString())
+-        return QString();
+-    QString cc = simpleCrypt.decryptToString(encrypted);
+-    QStringList parts = cc.split(",");
+-    return parts.at(2);
+-}
+-
+-QString Settings::getCCV(const QString &password)
+-{
+-    SimpleCrypt simpleCrypt(this->hash(password));
+-    QString encrypted = settings->value("cc", QString()).toString();
+-    if (encrypted == QString())
+-        return QString();
+-    QString cc = simpleCrypt.decryptToString(encrypted);
+-    QStringList parts = cc.split(",");
+-    return parts.at(3);
+-}
++
++
++
+ 
+ void Settings::setKaroakeDotNetUser(const QString &username, const QString &password)
+ {
+diff -ru a/src/settings.h b/src/settings.h
+--- a/src/settings.h	2025-08-12 16:19:06.000000000 +0000
++++ b/src/settings.h	2026-11-09 22:17:22.389259250 +0000
+@@ -92,9 +92,6 @@
+     void clearPassword();
+     bool chkPassword(QString password);
+     bool passIsSet();
+-    void setCC(QString ccn, QString month, QString year, QString ccv, QString passwd);
+-    void setSaveCC(bool save);
+-    bool saveCC();
+     void clearCC();
+     void clearKNAccount();
+     void setSaveKNAccount(bool save);
+@@ -102,10 +99,6 @@
+     bool testingEnabled();
+     bool hardwareAccelEnabled();
+     bool dbDoubleClickAddsSong();
+-    QString getCCN(const QString &password);
+-    QString getCCM(const QString &password);
+-    QString getCCY(const QString &password);
+-    QString getCCV(const QString &password);
+     void setKaroakeDotNetUser(const QString &username, const QString &password);
+     void setKaraokeDotNetPass(const QString &KDNPassword, const QString &password);
+     QString karoakeDotNetUser(const QString &password);
+diff -ru a/src/updatechecker.cpp b/src/updatechecker.cpp
+--- a/src/updatechecker.cpp	2025-08-12 16:19:06.000000000 +0000
++++ b/src/updatechecker.cpp	2026-11-09 22:16:41.252292454 +0000
+@@ -59,7 +59,7 @@
+         return;
+     qInfo() << "Requesting current version info for branch: " << channel;
+     connect(manager, &QNetworkAccessManager::finished, this, &UpdateChecker::onNetworkReply);
+-    [[maybe_unused]]QNetworkReply *reply = manager->get(QNetworkRequest(QUrl("http://openkj.org/downloads/" + OS + "-" + channel + "-curversion.txt")));
++    [[maybe_unused]]QNetworkReply *reply = manager->get(QNetworkRequest(QUrl("https://openkj.org/downloads/" + OS + "-" + channel + "-curversion.txt")));
+ //    while (!reply->isFinished())
+ //        QApplication::processEvents();
+ //    qInfo() << "Request completed";
+@@ -109,7 +109,7 @@
+     jsonObject.insert("arch", QSysInfo::currentCpuArchitecture());
+     QJsonDocument jsonDocument;
+     jsonDocument.setObject(jsonObject);
+-    QNetworkRequest request(QUrl("http://openkj.org/appanalytics"));
++    QNetworkRequest request(QUrl("https://openkj.org/appanalytics"));
+     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+     reply = manager->post(request, jsonDocument.toJson());
+ 
